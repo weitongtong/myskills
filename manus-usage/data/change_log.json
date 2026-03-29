@@ -1,0 +1,73 @@
+[
+  {
+    "syncAt": "2026-03-29T02:45:12.549Z",
+    "reported": true,
+    "changes": [
+      {
+        "title": "半画幅相机推荐",
+        "createAt": 1774703886,
+        "type": "CREDIT_LOG_TYPE_COST",
+        "credits": -33,
+        "sessionId": "w5Vc47afEuPuEQprqCVrFi",
+        "previousCredits": 0,
+        "delta": -33,
+        "action": "new"
+      },
+      {
+        "title": "大疆的产品有哪些",
+        "createAt": 1774702752,
+        "type": "CREDIT_LOG_TYPE_COST",
+        "credits": -81,
+        "sessionId": "ao5FgOiEqhD7Nd76yxnzxC",
+        "previousCredits": 0,
+        "delta": -81,
+        "action": "new"
+      },
+      {
+        "title": "最新AI新闻整理",
+        "createAt": 1774693987,
+        "type": "CREDIT_LOG_TYPE_COST",
+        "credits": -26,
+        "sessionId": "2SNxdk8jtEjgaappWdwBir",
+        "previousCredits": 0,
+        "delta": -26,
+        "action": "new"
+      },
+      {
+        "title": "This task has been deleted",
+        "createAt": 1774693042,
+        "type": "CREDIT_LOG_TYPE_COST",
+        "credits": -84,
+        "sessionId": "S1CYotGRZSVdQQ6714v8VR",
+        "previousCredits": 0,
+        "delta": -84,
+        "action": "new"
+      },
+      {
+        "title": "Bonus for new users",
+        "createAt": 1774582518,
+        "type": "CREDIT_LOG_TYPE_CREDIT_ALL",
+        "credits": 1000,
+        "previousCredits": 0,
+        "delta": 1000,
+        "action": "new"
+      }
+    ]
+  },
+  {
+    "syncAt": "2026-03-29T12:51:38.094Z",
+    "reported": true,
+    "changes": [
+      {
+        "title": "半画幅相机推荐",
+        "createAt": 1774788596,
+        "type": "CREDIT_LOG_TYPE_COST",
+        "credits": -64,
+        "sessionId": "w5Vc47afEuPuEQprqCVrFi",
+        "previousCredits": -33,
+        "delta": -31,
+        "action": "update"
+      }
+    ]
+  }
+]

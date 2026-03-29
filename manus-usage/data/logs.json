@@ -1,0 +1,36 @@
+[
+  {
+    "sessionId": "w5Vc47afEuPuEQprqCVrFi",
+    "title": "半画幅相机推荐",
+    "createAt": 1774788596,
+    "credits": -64,
+    "type": "CREDIT_LOG_TYPE_COST"
+  },
+  {
+    "sessionId": "ao5FgOiEqhD7Nd76yxnzxC",
+    "title": "大疆的产品有哪些",
+    "createAt": 1774702752,
+    "credits": -81,
+    "type": "CREDIT_LOG_TYPE_COST"
+  },
+  {
+    "sessionId": "2SNxdk8jtEjgaappWdwBir",
+    "title": "最新AI新闻整理",
+    "createAt": 1774693987,
+    "credits": -26,
+    "type": "CREDIT_LOG_TYPE_COST"
+  },
+  {
+    "sessionId": "S1CYotGRZSVdQQ6714v8VR",
+    "title": "This task has been deleted",
+    "createAt": 1774693042,
+    "credits": -84,
+    "type": "CREDIT_LOG_TYPE_COST"
+  },
+  {
+    "title": "Bonus for new users",
+    "createAt": 1774582518,
+    "credits": 1000,
+    "type": "CREDIT_LOG_TYPE_CREDIT_ALL"
+  }
+]
