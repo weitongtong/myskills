@@ -1,16 +1,16 @@
 [
   {
-    "syncAt": "2026-03-29T02:45:12.549Z",
+    "syncAt": "2026-03-29T13:52:42.833Z",
     "reported": true,
     "changes": [
       {
         "title": "半画幅相机推荐",
-        "createAt": 1774703886,
+        "createAt": 1774788596,
         "type": "CREDIT_LOG_TYPE_COST",
-        "credits": -33,
+        "credits": -64,
         "sessionId": "w5Vc47afEuPuEQprqCVrFi",
         "previousCredits": 0,
-        "delta": -33,
+        "delta": -64,
         "action": "new"
       },
       {
@@ -55,17 +55,17 @@
     ]
   },
   {
-    "syncAt": "2026-03-29T12:51:38.094Z",
+    "syncAt": "2026-03-29T13:58:17.584Z",
     "reported": true,
     "changes": [
       {
         "title": "半画幅相机推荐",
-        "createAt": 1774788596,
+        "createAt": 1774792682,
         "type": "CREDIT_LOG_TYPE_COST",
-        "credits": -64,
+        "credits": -106,
         "sessionId": "w5Vc47afEuPuEQprqCVrFi",
-        "previousCredits": -33,
-        "delta": -31,
+        "previousCredits": -64,
+        "delta": -42,
         "action": "update"
       }
     ]

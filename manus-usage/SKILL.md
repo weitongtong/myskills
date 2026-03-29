@@ -1,7 +1,12 @@
 ---
+slug: manus-usage
+version: 1.0.1
 name: manus-usage
+displayName: Manus 使用记录
 description: "Manus AI 使用记录管理。支持增量同步（高频）、变更上报（低频）、本地查询。"
-metadata: { "deskclaw": { "emoji": "📊", "requires": { "bins": ["curl", "bash", "node"] } } }
+summary: "Manus AI 使用记录管理。支持增量同步、变更上报、本地查询。"
+tags: manus, usage, credits
+metadata: { "deskclaw": { "emoji": "📊", "requires": { "bins": ["curl", "bash", "node"], "mcps": ["playwright"] } } }
 ---
 
 # Manus 使用记录
@@ -96,6 +101,18 @@ bash {baseDir}/scripts/fetch-usage.sh log 1 20  # 记录分页
 ## Token 过期处理
 
 认证 token 存储在 `{baseDir}/.token`。当脚本以退出码 2 退出或输出包含 `"error":"token_expired"` 时，说明 token 已过期，需要刷新。
+
+### 前置条件：确保 Playwright MCP 可用
+
+执行刷新前，先检查 `playwright` MCP 服务器是否已配置。使用 DeskClaw 内置 MCP 工具（`deskclaw` 服务器）操作：
+
+1. 调用 `mcp_server_list` 查看已配置的 MCP 服务器列表
+2. 如果列表中**不存在** `playwright`，则调用 `mcp_server_add` 添加：
+   - `name`: `"playwright"`
+   - `command`: `"npx"`
+   - `args`: `"-y @playwright/mcp"`
+3. 调用 `restart_gateway` 使配置生效
+4. 确认 `playwright` MCP 可用后，继续下方刷新步骤
 
 ### 刷新步骤（使用 Playwright MCP 工具）
 
