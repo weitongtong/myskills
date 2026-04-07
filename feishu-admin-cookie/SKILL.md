@@ -1,19 +1,12 @@
 ---
 slug: feishu-admin-cookie
-version: 1.2.0
+version: 1.3.0
 name: feishu-admin-cookie
 displayName: 飞书管理后台 Cookie 提取
 description: "从飞书管理后台提取 Cookie 和 API 凭证并上报。当用户提到飞书 cookie、飞书凭证刷新、飞书 AI 用量凭证时使用。"
 summary: "通过 Playwright 打开飞书管理后台，提取 Cookie / DPoP / UserID 后上报到本地服务。"
 tags: feishu, cookie, credentials
-metadata:
-  {
-    "deskclaw":
-      {
-        "emoji": "🔑",
-        "requires": { "bins": ["curl"], "mcps": ["playwright"] },
-      },
-  }
+metadata: { "deskclaw": { "emoji": "🔑", "requires": { "bins": ["curl"], "mcps": ["playwright"] } } }
 ---
 
 # 飞书管理后台 Cookie 提取与上报
@@ -50,7 +43,7 @@ metadata:
 
 Playwright 默认使用持久化 profile，Cookie 和登录态会跨会话保留，用户只需首次登录一次。
 
-**必须严格按步骤 1 → 2 → 3 → 4 → 5 的顺序执行，每步完成后验证结果再进入下一步。不要跳过任何步骤，不要自行添加额外步骤。**
+**必须严格按步骤 1 → 2 → 3 → 4 → 5 → 6 的顺序执行，每步完成后验证结果再进入下一步。不要跳过任何步骤，不要自行添加额外步骤。**
 
 ### 步骤 1：打开飞书管理后台
 
@@ -72,31 +65,49 @@ https://nodeskai.feishu.cn/admin/aibilling/usage-log
 - **已登录**：页面已显示管理后台内容（包含"用量"等文字）→ 直接进入步骤 3
 - **页面空白或异常**：用 `browser_wait_for` 等待 3 秒后再次 `browser_snapshot`，仍然异常则按"错误处理"章节处理
 
-### 步骤 3：捕获 API 请求，提取全部凭证
+### 步骤 3：捕获 API 请求并保存到文件
 
-用 MCP 工具 `browser_network_requests` 捕获 `entity_record` 请求：
+用 MCP 工具 `browser_network_requests` 捕获 `entity_record` 请求，**必须使用 `filename` 参数将结果保存到文件**（Cookie 字符串很长，不保存到文件会导致数据不完整）：
 
 - `filter`: `"entity_record"`
 - `requestHeaders`: `true`
 - `requestBody`: `false`
 - `static`: `false`
+- `filename`: `/tmp/feishu-network.txt`
 
-检查返回结果中是否包含 `entity_record` 请求。如果包含，从请求头中一次性提取三个值：
+工具返回后，结果已保存到文件，工具返回值本身只是确认信息，不要从返回值中提取数据。
 
-| 请求头            | 提取为        |
-| ----------------- | ------------- |
-| `cookie`          | `cookie`      |
-| `x-admin-user`    | `adminUserId` |
-| `x-passport-dpop` | `dpopToken`   |
-
-**如果没有捕获到 `entity_record` 请求**（仅允许重试一次）：
+**如果工具返回提示无匹配请求**（仅允许重试一次）：
 
 1. 用 `browser_navigate` 重新加载 `https://nodeskai.feishu.cn/admin/aibilling/usage-log`
 2. 用 `browser_wait_for` 等待文本 `用量` 出现
-3. 再次执行 `browser_network_requests` 捕获
+3. 再次执行 `browser_network_requests`（同样带 `filename` 参数）捕获
 4. 如果仍然没有捕获到，按"错误处理"章节处理
 
-### 步骤 4：校验数据并上报凭证
+### 步骤 4：从文件中读取并解析凭证
+
+用 `read_file` 读取 `/tmp/feishu-network.txt`，文件内容格式如下：
+
+```
+[POST] https://...entity_record => [200] OK
+ Request headers:
+  cookie: <完整 cookie 字符串>
+  x-admin-user: <用户ID>
+  x-passport-dpop: <DPoP token>
+  ...其他头...
+```
+
+从文件内容中逐行解析，提取三个值：
+
+| 请求头行前缀 | 提取为 |
+|-------------|--------|
+| `cookie:` | `cookie` |
+| `x-admin-user:` | `adminUserId` |
+| `x-passport-dpop:` | `dpopToken` |
+
+提取完成后删除临时文件：`rm -f /tmp/feishu-network.txt`
+
+### 步骤 5：校验数据并上报凭证
 
 检查 `cookie`、`adminUserId`、`dpopToken` 三个值均非空。如果有任何一个为空，向用户报告提取失败并停止。
 
@@ -118,9 +129,9 @@ curl -X POST http://101.126.66.51:8086/feishu-ai-usage/credentials \
 rm -f /tmp/feishu-credentials.json
 ```
 
-将三个占位符替换为步骤 3 中提取到的实际值。
+将三个占位符替换为步骤 4 中提取到的实际值。
 
-### 步骤 5：报告结果
+### 步骤 6：报告结果
 
 根据 curl 响应状态告知用户：
 
