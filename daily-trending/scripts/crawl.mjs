@@ -5,30 +5,49 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const BASE_DIR = join(__dirname, '..');
-const DATA_DIR = join(BASE_DIR, 'data');
+const DATA_DIR = join(__dirname, '..', 'data');
 
-const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36';
 
 // ── Args ──
 
 function parseArgs() {
   const args = process.argv.slice(2);
-  const opts = { source: 'all', keepDays: 90 };
+  const opts = { source: 'all', clean: false, keepDays: 90 };
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--source' && args[i + 1]) opts.source = args[++i];
+    if (args[i] === '--clean') opts.clean = true;
     if (args[i] === '--keep-days' && args[i + 1]) opts.keepDays = parseInt(args[++i], 10);
   }
   return opts;
 }
 
-// ── Hacker News ──
+// ── Helpers ──
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+function fmtDate(d) { return d.toISOString().slice(0, 10); }
+
+async function fetchWithRetry(url, options = {}, retries = 1) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(url, options);
+      if (res.ok) return res;
+      if (attempt < retries) { await sleep(1000 * (attempt + 1)); continue; }
+      throw new Error(`HTTP ${res.status}`);
+    } catch (e) {
+      if (attempt < retries) { await sleep(1000 * (attempt + 1)); continue; }
+      throw e;
+    }
+  }
+}
+
+// ── Hacker News (structured JSON via official API) ──
 
 async function fetchHN() {
-  const res = await fetch('https://hacker-news.firebaseio.com/v0/topstories.json', {
-    signal: AbortSignal.timeout(15000),
-  });
-  if (!res.ok) throw new Error(`HN topstories failed: ${res.status}`);
+  const res = await fetchWithRetry(
+    'https://hacker-news.firebaseio.com/v0/topstories.json',
+    { signal: AbortSignal.timeout(15000) },
+  );
   const ids = await res.json();
   const top = ids.slice(0, 30);
 
@@ -39,15 +58,15 @@ async function fetchHN() {
     const results = await Promise.all(
       batch.map(async (id) => {
         try {
-          const r = await fetch(
+          const r = await fetchWithRetry(
             `https://hacker-news.firebaseio.com/v0/item/${id}.json`,
-            { signal: AbortSignal.timeout(10000) }
+            { signal: AbortSignal.timeout(10000) },
           );
-          return r.ok ? r.json() : null;
+          return r.json();
         } catch {
           return null;
         }
-      })
+      }),
     );
     items.push(...results);
     if (i + BATCH < top.length) await sleep(200);
@@ -70,101 +89,31 @@ async function fetchHN() {
     });
 }
 
-// ── GitHub Trending ──
+// ── GitHub Trending (fetch HTML + strip noise, LLM will parse) ──
 
-async function fetchGitHub() {
-  const res = await fetch('https://github.com/trending', {
-    headers: { 'User-Agent': UA },
-    signal: AbortSignal.timeout(15000),
-  });
-  if (!res.ok) throw new Error(`GitHub trending failed: ${res.status}`);
+function stripNoise(html) {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<nav[\s\S]*?<\/nav>/gi, '')
+    .replace(/<footer[\s\S]*?<\/footer>/gi, '')
+    .replace(/<header[\s\S]*?<\/header>/gi, '')
+    .replace(/<svg[\s\S]*?<\/svg>/gi, '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/\n\s*\n/g, '\n')
+    .trim();
+}
+
+async function fetchGitHubHTML() {
+  const res = await fetchWithRetry(
+    'https://github.com/trending',
+    {
+      headers: { 'User-Agent': UA, Accept: 'text/html' },
+      signal: AbortSignal.timeout(15000),
+    },
+  );
   const html = await res.text();
-  return parseGitHubHTML(html);
-}
-
-function parseGitHubHTML(html) {
-  const items = [];
-  const articleRe = /<article[^>]*class="[^"]*Box-row[^"]*"[^>]*>([\s\S]*?)<\/article>/gi;
-  let match;
-
-  while ((match = articleRe.exec(html)) !== null && items.length < 25) {
-    const block = match[1];
-    try {
-      const repoMatch = block.match(/href="\/([^/]+\/[^/"]+)"/);
-      if (!repoMatch) continue;
-      const repo = repoMatch[1].trim();
-
-      let description = '';
-      const descMatch = block.match(/<p[^>]*class="[^"]*col-9[^"]*"[^>]*>([\s\S]*?)<\/p>/i);
-      if (descMatch) description = descMatch[1].replace(/<[^>]+>/g, '').trim();
-
-      let language = '';
-      const langMatch = block.match(/itemprop="programmingLanguage"[^>]*>([^<]+)/i);
-      if (langMatch) language = langMatch[1].trim();
-
-      let stars = 0;
-      const starsMatch = block.match(/href="\/[^"]*\/stargazers"[^>]*>([\s\S]*?)<\/a>/i);
-      if (starsMatch) {
-        const num = starsMatch[1].replace(/<[^>]+>/g, '').replace(/,/g, '').trim();
-        stars = parseInt(num, 10) || 0;
-      }
-
-      let todayStars = 0;
-      const todayMatch = block.match(/([\d,]+)\s*stars?\s*today/i);
-      if (todayMatch) todayStars = parseInt(todayMatch[1].replace(/,/g, ''), 10) || 0;
-
-      items.push({
-        rank: items.length + 1,
-        repo,
-        url: `https://github.com/${repo}`,
-        description,
-        language,
-        stars,
-        todayStars,
-      });
-    } catch (e) {
-      process.stderr.write(`[warn] GitHub parsing error on article: ${e.message}\n`);
-    }
-  }
-
-  if (items.length === 0) {
-    process.stderr.write('[warn] GitHub Trending: no articles parsed, HTML structure may have changed\n');
-  }
-  return items;
-}
-
-// ── Output generation ──
-
-function generateMarkdown(date, hn, gh) {
-  const lines = [`# ${date} 每日技术热榜\n`];
-
-  if (hn.length > 0) {
-    lines.push(`## Hacker News Top ${hn.length}\n`);
-    lines.push('| # | 标题 | 分数 | 评论 | 链接 |');
-    lines.push('|---|------|------|------|------|');
-    for (const item of hn) {
-      const title = item.title.replace(/\|/g, '\\|');
-      const link = item.url === item.hnUrl
-        ? `[讨论](${item.hnUrl})`
-        : `[原文](${item.url}) / [讨论](${item.hnUrl})`;
-      lines.push(`| ${item.rank} | ${title} | ${item.score} | ${item.comments} | ${link} |`);
-    }
-    lines.push('');
-  }
-
-  if (gh.length > 0) {
-    lines.push(`## GitHub Trending Top ${gh.length}\n`);
-    lines.push('| # | 项目 | 描述 | 语言 | Star | 今日 |');
-    lines.push('|---|------|------|------|------|------|');
-    for (const item of gh) {
-      const desc = (item.description || '-').replace(/\|/g, '\\|');
-      const starsStr = item.stars >= 1000 ? `${(item.stars / 1000).toFixed(1)}k` : String(item.stars);
-      lines.push(`| ${item.rank} | [${item.repo}](${item.url}) | ${desc} | ${item.language || '-'} | ${starsStr} | +${item.todayStars} |`);
-    }
-    lines.push('');
-  }
-
-  return lines.join('\n');
+  return stripNoise(html);
 }
 
 // ── Data cleanup ──
@@ -177,33 +126,34 @@ function cleanOldData(keepDays) {
   let removed = 0;
 
   for (const f of readdirSync(DATA_DIR)) {
-    const dateMatch = f.match(/^(\d{4}-\d{2}-\d{2})\.(json|md)$/);
+    const dateMatch = f.match(/^(\d{4}-\d{2}-\d{2})\.(json|md|gh\.html)$/);
     if (dateMatch && dateMatch[1] < cutoffStr) {
-      try {
-        unlinkSync(join(DATA_DIR, f));
-        removed++;
-      } catch { /* ignore */ }
+      try { unlinkSync(join(DATA_DIR, f)); removed++; } catch { /* ignore */ }
     }
   }
   return removed;
 }
 
-// ── Helpers ──
-
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-function fmtDate(d) { return d.toLocaleDateString('sv-SE'); }
-
 // ── Main ──
 
 async function main() {
   const opts = parseArgs();
-  const today = fmtDate(new Date());
-  const crawledAt = new Date().toISOString();
+
+  if (opts.clean) {
+    const removed = cleanOldData(opts.keepDays);
+    console.log(`已清理 ${removed} 个过期文件`);
+    return;
+  }
 
   mkdirSync(DATA_DIR, { recursive: true });
 
+  const today = fmtDate(new Date());
+  const crawledAt = new Date().toISOString();
+  const jsonPath = join(DATA_DIR, `${today}.json`);
+  const ghHtmlPath = join(DATA_DIR, `${today}.gh.html`);
+
   let hn = [];
-  let gh = [];
+  let ghHtmlSize = 0;
   let hnOk = false;
   let ghOk = false;
 
@@ -218,30 +168,28 @@ async function main() {
 
   if (opts.source === 'all' || opts.source === 'gh') {
     try {
-      gh = await fetchGitHub();
+      const ghHtml = await fetchGitHubHTML();
+      writeFileSync(ghHtmlPath, ghHtml, 'utf-8');
+      ghHtmlSize = ghHtml.length;
       ghOk = true;
     } catch (e) {
       process.stderr.write(`[error] GitHub crawl failed: ${e.message}\n`);
     }
   }
 
-  const data = { date: today, crawledAt, hn, gh };
-  const jsonPath = join(DATA_DIR, `${today}.json`);
-  const mdPath = join(DATA_DIR, `${today}.md`);
-
-  writeFileSync(jsonPath, JSON.stringify(data, null, 2), 'utf-8');
-  writeFileSync(mdPath, generateMarkdown(today, hn, gh), 'utf-8');
-
-  const removed = cleanOldData(opts.keepDays);
+  writeFileSync(jsonPath, JSON.stringify({ date: today, crawledAt, hn }, null, 2), 'utf-8');
 
   const parts = [];
   if (opts.source === 'all' || opts.source === 'hn') parts.push(`HN: ${hn.length} 条`);
-  if (opts.source === 'all' || opts.source === 'gh') parts.push(`GitHub: ${gh.length} 条`);
+  if (opts.source === 'all' || opts.source === 'gh') {
+    parts.push(ghOk ? `GitHub HTML: ${Math.round(ghHtmlSize / 1024)}KB` : 'GitHub: 失败');
+  }
 
-  console.log(`爬取完成 (${today})`);
-  console.log(`  ${parts.join(' | ')}`);
-  console.log(`  已保存: ${today}.json, ${today}.md`);
-  if (removed > 0) console.log(`  已清理: ${removed} 个过期文件`);
+  console.log(`爬取完成 (${today}) | ${parts.join(' | ')}`);
+  console.log(`已保存: ${today}.json${ghOk ? ', ' + today + '.gh.html' : ''}`);
+
+  const removed = cleanOldData(opts.keepDays);
+  if (removed > 0) console.log(`已清理: ${removed} 个过期文件`);
 
   const wantHN = opts.source === 'all' || opts.source === 'hn';
   const wantGH = opts.source === 'all' || opts.source === 'gh';
