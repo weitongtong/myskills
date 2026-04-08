@@ -29,19 +29,38 @@ git clone git@github.com:weitongtong/myskills.git
 - `curl`、`bash`、`node`
 - Playwright MCP（Token 刷新时使用）
 
+### daily-trending
+
+每日技术热榜爬取。支持 Hacker News Top Stories 和 GitHub Trending 日榜。
+
+**功能：**
+
+- **爬取** — 抓取 HN Top 30 和 GitHub Trending Top 25，保存 JSON + Markdown
+- **查询** — 查询本地已爬取的热榜数据，支持按天数、日期、数据源筛选
+
+**依赖：**
+
+- `node`（18+，使用内置 fetch）
+
 ## 目录结构
 
 ```
 myskills/
-└── manus-usage/
+├── manus-usage/
+│   ├── SKILL.md              # Skill 定义文件（AI Agent 指令）
+│   ├── scripts/
+│   │   ├── sync.mjs          # 增量同步脚本
+│   │   ├── report.mjs        # 变更上报脚本
+│   │   ├── query-local.mjs   # 本地数据查询
+│   │   ├── fetch-usage.sh    # 实时 API 查询（备用）
+│   │   └── refresh-token.sh  # Token 刷新
+│   └── data/                 # 运行时数据（本地生成，不含敏感信息）
+└── daily-trending/
     ├── SKILL.md              # Skill 定义文件（AI Agent 指令）
     ├── scripts/
-    │   ├── sync.mjs          # 增量同步脚本
-    │   ├── report.mjs        # 变更上报脚本
-    │   ├── query-local.mjs   # 本地数据查询
-    │   ├── fetch-usage.sh    # 实时 API 查询（备用）
-    │   └── refresh-token.sh  # Token 刷新
-    └── data/                 # 运行时数据（本地生成，不含敏感信息）
+    │   ├── crawl.mjs         # HN + GitHub Trending 爬取
+    │   └── query.mjs         # 本地数据查询
+    └── data/                 # 按日期归档的 JSON + Markdown
 ```
 
 ## 发布
