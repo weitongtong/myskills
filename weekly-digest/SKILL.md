@@ -39,22 +39,12 @@ metadata: { "deskclaw": { "emoji": "🎙️", "requires": { "bins": ["node"] } }
 
 ## 首次配置
 
-执行任何脚本前，先检查 `{baseDir}/.env` 是否存在。如果不存在，引导用户配置：
+脚本自动从 DeskClaw 的飞书通道配置（`~/.deskclaw/nanobot/config.json` 中 `channels.feishu`）读取 `appId` 和 `appSecret`，无需额外配置。
 
-1. 提示用户提供飞书应用的 `app_id` 和 `app_secret`（可复用飞书通道已有的凭证）
-2. 询问是否需要指定文档存放目录（`folder_token`，在飞书云盘文件夹 URL 中可找到）
-3. 询问租户域名（如 `xxx.feishu.cn`，默认 `bytedance.feishu.cn`）
-4. 将配置写入 `{baseDir}/.env`：
+首次使用时，运行 `node {baseDir}/scripts/doc-manager.mjs status` 验证连通性。如果返回：
 
-```
-FEISHU_APP_ID=cli_xxx
-FEISHU_APP_SECRET=xxx
-FEISHU_FOLDER_TOKEN=
-FEISHU_DOMAIN=bytedance.feishu.cn
-```
-
-5. 运行 `node {baseDir}/scripts/doc-manager.mjs status` 验证连通性
-6. 如果返回权限错误，提示用户去飞书开放平台后台为应用添加 `docx:document`（文档读写）和 `drive:drive`（云空间管理）权限，然后重新发布应用版本
+- `feishu_not_configured`：说明飞书通道尚未配置，请先在 DeskClaw 设置中配置飞书通道
+- 权限错误：提示用户去飞书开放平台后台为应用添加 `docx:document`（文档读写）和 `drive:drive`（云空间管理）权限，然后重新发布应用版本
 
 ## 收录流程
 
@@ -180,7 +170,7 @@ node {baseDir}/scripts/doc-manager.mjs status
 | 退出码 | 含义 | 处理方式 |
 |--------|------|----------|
 | 0 | 成功 | 正常处理脚本 JSON 输出 |
-| 1 | 配置缺失（.env 不存在或缺少必要字段） | 引导用户执行首次配置 |
+| 1 | 配置缺失（飞书通道未配置或 config.json 不存在） | 引导用户在 DeskClaw 中配置飞书通道 |
 | 2 | API 错误（权限不足、网络错误等） | 展示错误信息，提示用户检查飞书应用权限 |
 | 3 | 内容重复（已收录过相同来源） | 告知用户该内容已收录，询问是否要重复收录 |
 

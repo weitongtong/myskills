@@ -3,38 +3,58 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { homedir } from 'os';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BASE_DIR = join(__dirname, '..');
 const DATA_DIR = join(BASE_DIR, 'data');
-const ENV_PATH = join(BASE_DIR, '.env');
 const STATE_PATH = join(DATA_DIR, 'state.json');
 const TOKEN_CACHE_PATH = join(DATA_DIR, '.token_cache.json');
 
 const FEISHU_API = 'https://open.feishu.cn/open-apis';
+const DEFAULT_DOMAIN = 'bytedance.feishu.cn';
 
 const BLOCK_TYPE = { TEXT: 2, HEADING2: 4, DIVIDER: 22 };
 
-// ── Env ──
+// ── Config ──
 
-function loadEnv() {
-  if (!existsSync(ENV_PATH)) {
-    output({ status: 'error', code: 'env_missing', message: '.env 文件不存在，请先配置飞书凭证' });
+function loadConfig() {
+  const configPath = process.env.NANOBOT_CONFIG_PATH
+    || join(homedir(), '.deskclaw', 'nanobot', 'config.json');
+
+  if (!existsSync(configPath)) {
+    output({
+      status: 'error',
+      code: 'config_not_found',
+      message: `未找到 nanobot 配置文件: ${configPath}，请确认 DeskClaw 已正确安装`,
+    });
     process.exit(1);
   }
-  const env = {};
-  for (const line of readFileSync(ENV_PATH, 'utf-8').split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const idx = trimmed.indexOf('=');
-    if (idx === -1) continue;
-    env[trimmed.slice(0, idx).trim()] = trimmed.slice(idx + 1).trim();
-  }
-  if (!env.FEISHU_APP_ID || !env.FEISHU_APP_SECRET) {
-    output({ status: 'error', code: 'env_incomplete', message: '.env 缺少 FEISHU_APP_ID 或 FEISHU_APP_SECRET' });
+
+  let config;
+  try {
+    config = JSON.parse(readFileSync(configPath, 'utf-8'));
+  } catch {
+    output({ status: 'error', code: 'config_parse_error', message: `配置文件解析失败: ${configPath}` });
     process.exit(1);
   }
-  return env;
+
+  const feishu = config?.channels?.feishu;
+  if (!feishu?.appId || !feishu?.appSecret) {
+    output({
+      status: 'error',
+      code: 'feishu_not_configured',
+      message: '飞书通道未配置或缺少 appId/appSecret，请先在 DeskClaw 设置中配置飞书通道',
+    });
+    process.exit(1);
+  }
+
+  return {
+    FEISHU_APP_ID: feishu.appId,
+    FEISHU_APP_SECRET: feishu.appSecret,
+    FEISHU_DOMAIN: DEFAULT_DOMAIN,
+    FEISHU_FOLDER_TOKEN: '',
+  };
 }
 
 // ── Output ──
@@ -156,7 +176,7 @@ function buildDocUrl(documentId, env) {
 async function createDocument(token, env) {
   const weekStart = getWeekStart();
   const weekEnd = getWeekEnd(weekStart);
-  const title = `周报分享稿 ${weekStart} ~ ${weekEnd}`;
+  const title = `分享速记 ${weekStart} ~ ${weekEnd}`;
 
   const body = { title };
   if (env.FEISHU_FOLDER_TOKEN) body.folder_token = env.FEISHU_FOLDER_TOKEN;
@@ -326,7 +346,7 @@ async function cmdCreate(env) {
 async function main() {
   mkdirSync(DATA_DIR, { recursive: true });
 
-  const env = loadEnv();
+  const env = loadConfig();
   const cmd = process.argv[2];
 
   switch (cmd) {
