@@ -1,6 +1,6 @@
 ---
 slug: weekly-digest
-version: 1.0.0
+version: 1.1.0
 name: weekly-digest
 displayName: 分享速记
 description: "将外部文档/URL/文本自动生成口语化分享逐字稿，写入飞书文档。每周一个文档，同周追加。当用户发送文章链接、文件或文本摘要，希望生成可分享的逐字稿时使用。"
