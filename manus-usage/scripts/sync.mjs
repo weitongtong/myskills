@@ -1,95 +1,70 @@
 #!/usr/bin/env node
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
-import { dirname, join } from 'path';
-import { fileURLToPath } from 'url';
+import {
+  CHANGE_LOG_FILE,
+  CREDITS_FILE,
+  LOGS_FILE,
+  SYNC_STATE_FILE,
+  callManusApi,
+  ensureDataDir,
+  finalizeScript,
+  makeSuccess,
+  parseCommonArgs,
+  printJson,
+  readJson,
+  writeJson,
+} from './lib.mjs';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const BASE_DIR = join(__dirname, '..');
-const DATA_DIR = join(BASE_DIR, 'data');
-const LOGS_FILE = join(DATA_DIR, 'logs.json');
-const CHANGE_LOG_FILE = join(DATA_DIR, 'change_log.json');
-const SYNC_STATE_FILE = join(DATA_DIR, 'sync_state.json');
-const TOKEN_FILE = join(BASE_DIR, '.token');
-
-const API_BASE = 'https://api.manus.im/user.v1.UserService';
 const PAGE_SIZE = 50;
-
-function ensureDataDir() {
-  if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
-}
-
-function readJson(path, fallback) {
-  if (!existsSync(path)) return fallback;
-  try {
-    return JSON.parse(readFileSync(path, 'utf-8'));
-  } catch {
-    return fallback;
-  }
-}
-
-function writeJson(path, data) {
-  writeFileSync(path, JSON.stringify(data, null, 2) + '\n');
-}
-
-function getToken() {
-  if (!existsSync(TOKEN_FILE)) {
-    console.error(JSON.stringify({ error: 'token_not_found', message: 'Token 文件不存在，请先刷新 token' }));
-    process.exit(1);
-  }
-  return readFileSync(TOKEN_FILE, 'utf-8').trim();
-}
 
 function matchKey(record) {
   if (record.sessionId) return record.sessionId;
   return `${record.createAt}:${record.title}`;
 }
 
-async function callApi(endpoint, body = {}) {
-  const token = getToken();
-  const res = await fetch(`${API_BASE}/${endpoint}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`,
-      'connect-protocol-version': '1',
-    },
-    body: JSON.stringify(body),
-  });
+function pickLogFields(record) {
+  const picked = {
+    title: record.title,
+    createAt: record.createAt,
+    type: record.type,
+    credits: record.credits,
+  };
+  if (record.sessionId) picked.sessionId = record.sessionId;
+  return picked;
+}
 
-  if (res.status === 401) {
-    console.error(JSON.stringify({ error: 'token_expired', message: 'Manus token 已过期，请按 SKILL.md 中的指引刷新 token' }));
-    process.exit(2);
-  }
-
-  if (!res.ok) {
-    const text = await res.text();
-    console.error(JSON.stringify({ error: 'api_error', http_code: res.status, body: text }));
-    process.exit(3);
-  }
-
-  return res.json();
+function sortLogs(records) {
+  return [...records].sort((a, b) => (b.createAt || 0) - (a.createAt || 0));
 }
 
 async function main() {
+  const { json } = parseCommonArgs();
   ensureDataDir();
 
-  const logs = readJson(LOGS_FILE, []);
+  const existingLogs = readJson(LOGS_FILE, []);
   const localIndex = new Map();
-  for (const record of logs) {
-    localIndex.set(matchKey(record), record);
+  for (const record of existingLogs) {
+    localIndex.set(matchKey(record), { ...record });
   }
 
-  const isFirstRun = logs.length === 0;
-  console.log(`[sync] 本地记录数: ${logs.length}${isFirstRun ? '（首次运行，将全量拉取）' : ''}`);
+  const isFirstRun = existingLogs.length === 0;
+  if (!json) {
+    console.log(
+      `[sync] 本地记录数: ${existingLogs.length}${isFirstRun ? '（首次运行，将全量拉取）' : ''}`,
+    );
+  }
 
   const changes = [];
   let page = 1;
   let stopScanning = false;
 
   while (!stopScanning) {
-    console.log(`[sync] 拉取第 ${page} 页...`);
-    const result = await callApi('ListUserCreditsLog', { page, pageSize: PAGE_SIZE });
+    if (!json) console.log(`[sync] 拉取第 ${page} 页...`);
+
+    const result = await callManusApi('ListUserCreditsLog', {
+      page,
+      pageSize: PAGE_SIZE,
+    });
     const items = result.logs || [];
 
     if (items.length === 0) break;
@@ -102,27 +77,27 @@ async function main() {
 
       if (!localRecord) {
         changes.push({
-          ..._pickFields(apiRecord),
+          ...pickLogFields(apiRecord),
           previousCredits: 0,
           delta: apiRecord.credits,
           action: 'new',
         });
-        localIndex.set(key, apiRecord);
+        localIndex.set(key, { ...pickLogFields(apiRecord) });
       } else if (localRecord.credits !== apiRecord.credits) {
         changes.push({
-          ..._pickFields(apiRecord),
+          ...pickLogFields(apiRecord),
           previousCredits: localRecord.credits,
           delta: apiRecord.credits - localRecord.credits,
           action: 'update',
         });
-        Object.assign(localRecord, apiRecord);
+        localIndex.set(key, { ...localRecord, ...pickLogFields(apiRecord) });
       } else {
         pageUnchangedCount++;
       }
     }
 
     if (!isFirstRun && pageUnchangedCount === items.length) {
-      console.log(`[sync] 第 ${page} 页全部无变化，停止扫描`);
+      if (!json) console.log(`[sync] 第 ${page} 页全部无变化，停止扫描`);
       stopScanning = true;
     }
 
@@ -130,42 +105,49 @@ async function main() {
     page++;
   }
 
-  if (changes.length === 0) {
+  const credits = await callManusApi('GetAvailableCredits', {});
+  const syncedAt = new Date().toISOString();
+
+  writeJson(CREDITS_FILE, {
+    updatedAt: syncedAt,
+    credits,
+  });
+  writeJson(SYNC_STATE_FILE, { lastSyncAt: syncedAt });
+
+  let totalLogs = existingLogs.length;
+  if (changes.length > 0) {
+    const updatedLogs = sortLogs(Array.from(localIndex.values()));
+    const changeLog = readJson(CHANGE_LOG_FILE, []);
+
+    writeJson(LOGS_FILE, updatedLogs);
+    changeLog.push({
+      syncAt: syncedAt,
+      reported: false,
+      changes,
+    });
+    writeJson(CHANGE_LOG_FILE, changeLog);
+    totalLogs = updatedLogs.length;
+
+    if (!json) {
+      console.log(`[sync] 发现 ${changes.length} 条变化（新增/更新）`);
+      console.log(`[sync] 同步完成，本地共 ${updatedLogs.length} 条记录，变更已记入 change_log`);
+    }
+  } else if (!json) {
     console.log('[sync] 无变化');
-    writeJson(SYNC_STATE_FILE, { lastSyncAt: new Date().toISOString() });
-    return;
+    console.log('[sync] 积分快照已更新');
   }
 
-  console.log(`[sync] 发现 ${changes.length} 条变化（新增/更新）`);
-
-  const updatedLogs = Array.from(localIndex.values());
-  writeJson(LOGS_FILE, updatedLogs);
-
-  const changeLog = readJson(CHANGE_LOG_FILE, []);
-  changeLog.push({
-    syncAt: new Date().toISOString(),
-    reported: false,
-    changes,
-  });
-  writeJson(CHANGE_LOG_FILE, changeLog);
-
-  writeJson(SYNC_STATE_FILE, { lastSyncAt: new Date().toISOString() });
-
-  console.log(`[sync] 同步完成，本地共 ${updatedLogs.length} 条记录，变更已记入 change_log`);
+  if (json) {
+    printJson(makeSuccess({
+      message: changes.length > 0 ? '同步完成' : '无变化，积分余额已刷新',
+      changesCount: changes.length,
+      totalLogs,
+      lastSyncAt: syncedAt,
+      credits,
+    }));
+  }
 }
 
-function _pickFields(record) {
-  const picked = {
-    title: record.title,
-    createAt: record.createAt,
-    type: record.type,
-    credits: record.credits,
-  };
-  if (record.sessionId) picked.sessionId = record.sessionId;
-  return picked;
-}
-
-main().catch(err => {
-  console.error(`[sync] 未预期的错误: ${err.message}`);
-  process.exit(1);
+main().catch(error => {
+  finalizeScript(error, parseCommonArgs().json, err => `[sync] 未预期的错误: ${err.message}`);
 });

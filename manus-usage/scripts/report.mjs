@@ -1,45 +1,23 @@
 #!/usr/bin/env node
 
-import { readFileSync, writeFileSync, existsSync } from 'fs';
-import { dirname, join } from 'path';
-import { fileURLToPath } from 'url';
+import {
+  CHANGE_LOG_FILE,
+  ScriptError,
+  decodeJwtPayload,
+  finalizeScript,
+  makeSuccess,
+  parseCommonArgs,
+  printJson,
+  readJson,
+  readToken,
+  writeJson,
+} from './lib.mjs';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const BASE_DIR = join(__dirname, '..');
-const DATA_DIR = join(BASE_DIR, 'data');
-const CHANGE_LOG_FILE = join(DATA_DIR, 'change_log.json');
-const TOKEN_FILE = join(BASE_DIR, '.token');
-
-// const REPORT_URL = 'http://localhost:8086/manus-credit-log/upload';
 const REPORT_URL = 'http://101.126.66.51:8086/manus-credit-log/upload';
 const BATCH_SIZE = 50;
 
-function readJson(path, fallback) {
-  if (!existsSync(path)) return fallback;
-  try {
-    return JSON.parse(readFileSync(path, 'utf-8'));
-  } catch {
-    return fallback;
-  }
-}
-
-function writeJson(path, data) {
-  writeFileSync(path, JSON.stringify(data, null, 2) + '\n');
-}
-
-function decodeJwtPayload(token) {
-  const parts = token.split('.');
-  if (parts.length !== 3) throw new Error('Invalid JWT format');
-  const payload = Buffer.from(parts[1], 'base64url').toString('utf-8');
-  return JSON.parse(payload);
-}
-
 function getUserInfo() {
-  if (!existsSync(TOKEN_FILE)) {
-    console.error(JSON.stringify({ error: 'token_not_found', message: 'Token 文件不存在' }));
-    process.exit(1);
-  }
-  const token = readFileSync(TOKEN_FILE, 'utf-8').trim();
+  const token = readToken({ validate: true });
   const payload = decodeJwtPayload(token);
   return {
     email: payload.email,
@@ -49,9 +27,9 @@ function getUserInfo() {
 }
 
 function collectSyncEvents(entries) {
-  return entries.map(e => ({
-    syncAt: e.syncAt,
-    changes: e.changes,
+  return entries.map(entry => ({
+    syncAt: entry.syncAt,
+    changes: entry.changes,
   }));
 }
 
@@ -70,82 +48,135 @@ function batchSyncEvents(syncEvents) {
     currentCount += event.changes.length;
   }
 
-  if (currentBatch.length > 0) {
-    batches.push(currentBatch);
-  }
-
+  if (currentBatch.length > 0) batches.push(currentBatch);
   return batches;
 }
 
 async function uploadBatch(user, syncEvents) {
-  const res = await fetch(REPORT_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ user, syncEvents }),
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`HTTP ${res.status}: ${text}`);
+  let response;
+  try {
+    response = await fetch(REPORT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user, syncEvents }),
+    });
+  } catch (error) {
+    throw new ScriptError('report_error', '上报失败，请检查上报服务是否可用', {
+      exitCode: 4,
+      details: {
+        cause: error instanceof Error ? error.message : String(error),
+      },
+    });
   }
 
-  return res.json();
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new ScriptError('report_error', `上报失败（HTTP ${response.status}）`, {
+      exitCode: 4,
+      details: {
+        httpCode: response.status,
+        body: text,
+      },
+    });
+  }
+
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
 }
 
 async function main() {
+  const { json } = parseCommonArgs();
   const changeLog = readJson(CHANGE_LOG_FILE, []);
   const unreportedIndices = [];
 
-  for (let i = 0; i < changeLog.length; i++) {
-    if (!changeLog[i].reported) {
-      unreportedIndices.push(i);
-    }
+  for (let index = 0; index < changeLog.length; index++) {
+    if (!changeLog[index].reported) unreportedIndices.push(index);
   }
 
   if (unreportedIndices.length === 0) {
-    console.log('[report] 无未上报的变更，跳过');
-    process.exit(0);
+    const payload = makeSuccess({
+      message: '无未上报的变更，跳过',
+      reportedEventCount: 0,
+      remainingEventCount: 0,
+    });
+    if (json) {
+      printJson(payload);
+    } else {
+      console.log('[report] 无未上报的变更，跳过');
+    }
+    return;
   }
 
-  const unreportedEntries = unreportedIndices.map(i => changeLog[i]);
-  const totalChanges = unreportedEntries.reduce((sum, e) => sum + e.changes.length, 0);
-  console.log(`[report] 待上报 ${unreportedEntries.length} 个同步事件（共 ${totalChanges} 条变更）`);
-
+  const unreportedEntries = unreportedIndices.map(index => changeLog[index]);
+  const totalChanges = unreportedEntries.reduce((sum, entry) => sum + entry.changes.length, 0);
   const user = getUserInfo();
-  console.log(`[report] 用户: ${user.name} (${user.email})`);
+
+  if (!json) {
+    console.log(`[report] 待上报 ${unreportedEntries.length} 个同步事件（共 ${totalChanges} 条变更）`);
+    console.log(`[report] 用户: ${user.name} (${user.email})`);
+  }
 
   const syncEvents = collectSyncEvents(unreportedEntries);
   const batches = batchSyncEvents(syncEvents);
-
   let reportedEventCount = 0;
 
-  for (let b = 0; b < batches.length; b++) {
-    const batch = batches[b];
-    const batchChanges = batch.reduce((sum, e) => sum + e.changes.length, 0);
-    console.log(`[report] 上报第 ${b + 1}/${batches.length} 批（${batch.length} 个事件，${batchChanges} 条变更）...`);
+  for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+    const batch = batches[batchIndex];
+    const batchChanges = batch.reduce((sum, entry) => sum + entry.changes.length, 0);
+
+    if (!json) {
+      console.log(
+        `[report] 上报第 ${batchIndex + 1}/${batches.length} 批（${batch.length} 个事件，${batchChanges} 条变更）...`,
+      );
+    }
 
     try {
       await uploadBatch(user, batch);
-
-      for (const event of batch) {
-        const idx = unreportedIndices[reportedEventCount];
-        changeLog[idx].reported = true;
-        reportedEventCount++;
+    } catch (error) {
+      if (json) {
+        const details = {
+          reportedEventCount,
+          remainingEventCount: unreportedEntries.length - reportedEventCount,
+        };
+        printJson({
+          ...{
+            ok: false,
+            error: error instanceof ScriptError ? error.code : 'report_error',
+            message: error instanceof Error ? error.message : String(error),
+          },
+          ...(error instanceof ScriptError && error.details ? { details: error.details } : {}),
+          ...details,
+        });
+        process.exit(error instanceof ScriptError ? error.exitCode : 4);
       }
-      writeJson(CHANGE_LOG_FILE, changeLog);
 
-      console.log(`[report] 第 ${b + 1} 批上报成功`);
-    } catch (err) {
-      console.error(`[report] 第 ${b + 1} 批上报失败: ${err.message}`);
-      console.error(`[report] 已成功 ${reportedEventCount}/${unreportedEntries.length} 个事件，下次运行将继续`);
-      process.exit(4);
+      throw error;
     }
+
+    for (let offset = 0; offset < batch.length; offset++) {
+      const idx = unreportedIndices[reportedEventCount];
+      changeLog[idx].reported = true;
+      reportedEventCount++;
+    }
+    writeJson(CHANGE_LOG_FILE, changeLog);
+
+    if (!json) console.log(`[report] 第 ${batchIndex + 1} 批上报成功`);
   }
 
-  console.log(`[report] 全部上报完成，共 ${reportedEventCount} 个同步事件`);
+  if (json) {
+    printJson(makeSuccess({
+      message: '全部上报完成',
+      reportedEventCount,
+      remainingEventCount: 0,
+    }));
+  } else {
+    console.log(`[report] 全部上报完成，共 ${reportedEventCount} 个同步事件`);
+  }
 }
 
-main().catch(err => {
-  console.error(`[report] 未预期的错误: ${err.message}`);
-  process.exit(1);
+main().catch(error => {
+  finalizeScript(error, parseCommonArgs().json, err => `[report] 未预期的错误: ${err.message}`);
 });
